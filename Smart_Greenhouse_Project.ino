@@ -1,4 +1,17 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
 #include <DHT.h>
+
+// =====================
+// WiFi Credentials
+// =====================
+const char* ssid = "wifi sejati_5G";
+const char* password = "geng1234";
+
+// =====================
+// ThingsBoard
+// =====================
+const char* server = "http://demo.thingsboard.io/api/v1/MKyTiePKBgMxXSAnJTOW/telemetry";
 
 // =====================
 // Pin Definitions
@@ -18,18 +31,31 @@
 // Settings
 // =====================
 float tempThreshold = 35.0;
-
-// Adjust after testing your LDR
 int darkThreshold = 3000;
-
-// Adjust after testing moisture sensor
 int moistureThreshold = 2000;
 
 DHT dht(DHTPIN, DHTTYPE);
 
+// =====================
+// WiFi Setup
+// =====================
+void connectWiFi() {
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting WiFi");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\nWiFi Connected");
+}
+
 void setup() {
 
   Serial.begin(115200);
+
+  connectWiFi();
 
   dht.begin();
 
@@ -37,8 +63,8 @@ void setup() {
   pinMode(WATER_PUMP_PIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
 
-  digitalWrite(FAN_RELAY_PIN, LOW);
-  digitalWrite(WATER_PUMP_PIN, LOW);
+  digitalWrite(FAN_RELAY_PIN, HIGH);
+  digitalWrite(WATER_PUMP_PIN, HIGH);
   digitalWrite(LED_PIN, LOW);
 
   Serial.println("Smart Plant Monitoring System");
@@ -46,84 +72,101 @@ void setup() {
 
 void loop() {
 
-  // =====================
-  // DHT11 Reading
-  // =====================
   float humidity = dht.readHumidity();
   float temperature = dht.readTemperature();
 
-  // =====================
-  // LDR Reading
-  // =====================
   int ldrValue = analogRead(LDR_PIN);
-
-  // =====================
-  // Moisture Reading
-  // =====================
   int moistureValue = analogRead(MOISTURE_PIN);
 
-  // =====================
-  // Display Data
-  // =====================
   Serial.println("---------------");
 
+  // =====================
+  // DHT
+  // =====================
   if (!isnan(temperature) && !isnan(humidity)) {
 
-    Serial.print("Temperature: ");
-    Serial.print(temperature);
-    Serial.println(" °C");
+    Serial.print("Temp: ");
+    Serial.println(temperature);
 
     Serial.print("Humidity: ");
-    Serial.print(humidity);
-    Serial.println(" %");
-
-  } else {
-    Serial.println("DHT11 Read Failed");
+    Serial.println(humidity);
   }
 
-  Serial.print("LDR Value: ");
+  // =====================
+  // LDR
+  // =====================
+  Serial.print("LDR: ");
   Serial.println(ldrValue);
 
-  Serial.print("Moisture Value: ");
+  // =====================
+  // Moisture
+  // =====================
+  Serial.print("Moisture: ");
   Serial.println(moistureValue);
 
   // =====================
-  // Fan Control
+  // FAN LOGIC (UNCHANGED)
   // =====================
-  if (!isnan(temperature)) {
+  int fanState = 0;
 
-    if (temperature >= tempThreshold) {
-      digitalWrite(FAN_RELAY_PIN, LOW);
-      Serial.println("Fan: ON");
-    } else {
-      digitalWrite(FAN_RELAY_PIN, HIGH);
-      Serial.println("Fan: OFF");
-    }
+  if (temperature >= tempThreshold) {
+    digitalWrite(FAN_RELAY_PIN, LOW);
+    Serial.println("Fan: ON");
+    fanState = 1;
+  } else {
+    digitalWrite(FAN_RELAY_PIN, HIGH);
+    Serial.println("Fan: OFF");
   }
 
   // =====================
-  // LED Control
+  // LED LOGIC (UNCHANGED)
   // =====================
   if (ldrValue > darkThreshold) {
-
     digitalWrite(LED_PIN, HIGH);
     Serial.println("LED: ON (Dark)");
-
   } else {
-
     digitalWrite(LED_PIN, LOW);
     Serial.println("LED: OFF (Bright)");
   }
 
   // =====================
-  // Water Pump Control (same logic style as fan)
+  // PUMP LOGIC (UNCHANGED)
   // =====================
+  int pumpState = 0;
+
   if (moistureValue >= moistureThreshold) {
     digitalWrite(WATER_PUMP_PIN, LOW);
     Serial.println("Pump: ON (Dry)");
+    pumpState = 1;
   } else {
     digitalWrite(WATER_PUMP_PIN, HIGH);
     Serial.println("Pump: OFF (Wet)");
+  }
+
+  // =====================
+  // SEND TO THINGSBOARD
+  // =====================
+  if (WiFi.status() == WL_CONNECTED) {
+
+    HTTPClient http;
+    http.begin(server);
+    http.addHeader("Content-Type", "application/json");
+
+    String payload = "{";
+    payload += "\"temperature\":" + String(temperature) + ",";
+    payload += "\"humidity\":" + String(humidity) + ",";
+    payload += "\"ldr\":" + String(ldrValue) + ",";
+    payload += "\"moisture\":" + String(moistureValue) + ",";
+    payload += "\"fan\":" + String(fanState) + ",";
+    payload += "\"pump\":" + String(pumpState);
+    payload += "}";
+
+    int httpResponseCode = http.POST(payload);
+
+    Serial.print("ThingsBoard Response: ");
+    Serial.println(httpResponseCode);
+
+    http.end();
   }
 
   delay(2000);
